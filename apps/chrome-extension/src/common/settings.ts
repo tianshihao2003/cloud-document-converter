@@ -22,6 +22,7 @@ export enum Theme {
 export enum DownloadMethod {
   Direct = 'direct',
   ShowSaveFilePicker = 'showSaveFilePicker',
+  ShowDirectoryPicker = 'showDirectoryPicker',
 }
 
 export enum Table {

@@ -5,7 +5,7 @@ import { toTypedSchema } from '@vee-validate/zod'
 import { z } from 'zod/v4'
 import { pick } from 'es-toolkit'
 import { useI18n } from 'vue-i18n'
-import { LoaderCircle } from 'lucide-vue-next'
+import { Info, LoaderCircle } from 'lucide-vue-next'
 import { supported } from 'browser-fs-access'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
@@ -58,12 +58,17 @@ const onSubmit = handleSubmit.withControlled(async values => {
   await mutation.mutateAsync(values)
 })
 
+const isDirectoryPickerSupported =
+  typeof window.showDirectoryPicker === 'function'
+
 const downloadMethodDescription = computed(() => {
   switch (values[SettingKey.DownloadMethod]) {
     case DownloadMethod.Direct:
       return t('download.method.direct.description')
     case DownloadMethod.ShowSaveFilePicker:
       return t('download.method.showSaveFilePicker.description')
+    case DownloadMethod.ShowDirectoryPicker:
+      return t('download.method.showDirectoryPicker.description')
     default:
       return ''
   }
@@ -116,11 +121,30 @@ const downloadMethodDescription = computed(() => {
                     :disabled="!supported"
                     >{{ t('download.method.showSaveFilePicker') }}</SelectItem
                   >
+                  <SelectItem
+                    :value="DownloadMethod.ShowDirectoryPicker"
+                    :disabled="!isDirectoryPickerSupported"
+                    >{{ t('download.method.showDirectoryPicker') }}</SelectItem
+                  >
                 </SelectGroup>
               </SelectContent>
             </Select>
           </Field>
         </VeeField>
+        <Field v-if="isDirectoryPickerSupported" orientation="responsive">
+          <FieldContent>
+            <FieldLabel>{{ t('download.default_folder') }}</FieldLabel>
+            <FieldDescription>
+              {{ t('download.default_folder.description') }}
+            </FieldDescription>
+            <div
+              class="flex items-center gap-2 mt-2 text-sm text-muted-foreground"
+            >
+              <Info class="size-4 shrink-0" />
+              <span>{{ t('download.default_folder.auto_save') }}</span>
+            </div>
+          </FieldContent>
+        </Field>
         <VeeField
           v-slot="{ field, errors }"
           :name="`[${SettingKey.DownloadFileWithUniqueName}]`"

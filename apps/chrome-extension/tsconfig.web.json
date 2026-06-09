@@ -9,5 +9,9 @@
       "@/*": ["./src/*"]
     }
   },
-  "include": ["src/scripts/*.ts", "src/common/*.ts"]
+  "include": [
+    "src/scripts/*.ts",
+    "src/common/*.ts",
+    "src/file-system-access.d.ts"
+  ]
 }

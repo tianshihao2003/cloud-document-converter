@@ -38,14 +38,24 @@ export const i18n = createI18n({
         'Preserve text highlighting (font color, font background color)',
       'download.file_with_unique_name':
         'Use UUID for image and diagram filenames',
+      'download.default_folder': 'Default Download Folder',
+      'download.default_folder.description':
+        'When you first use "Save to Folder", the selected folder will be remembered for each website. Subsequent downloads on the same website will use the saved folder automatically.',
+      'download.default_folder.auto_save':
+        'Folder is automatically saved when you first select it during download.',
+      'download.default_folder.required':
+        'No saved folder for this website. Please click the download button and select a folder first.',
       'download.method': 'Download Method',
       'download.method.placeholder': 'Select download method',
       'download.method.direct': 'Direct Download',
       'download.method.showSaveFilePicker': 'Show Save File Picker',
+      'download.method.showDirectoryPicker': 'Save to Folder',
       'download.method.direct.description':
         'How browsers treat downloads varies by browser, user settings, and other factors.The user may be prompted before a download starts, or the file may be saved automatically, or it may open automatically, either in an external application or in the browser itself.',
       'download.method.showSaveFilePicker.description':
         'Shows a file picker that allows a user to save a file. Either by selecting an existing file, or entering a name for a new file.',
+      'download.method.showDirectoryPicker.description':
+        'Allows you to select a folder and save the Markdown file and all images/attachments directly to it, without creating a ZIP archive.',
       'lark.docx.download': 'Download as Markdown',
       'lark.docx.copy': 'Copy as Markdown',
       'lark.docx.view': 'View as Markdown',
@@ -79,14 +89,24 @@ export const i18n = createI18n({
       'general.grid.to_html': '转换成 HTML',
       'general.text_highlight': '保留文本高亮（字体颜色、字体背景颜色）',
       'download.file_with_unique_name': '图片和图表文件使用 UUID 命名',
+      'download.default_folder': '默认下载文件夹',
+      'download.default_folder.description':
+        '首次使用"保存到文件夹"时选择的文件夹会被记住（按网站分别保存）。之后在同一网站下载时会自动使用已保存的文件夹。',
+      'download.default_folder.auto_save':
+        '文件夹会在您首次下载选择时自动保存。',
+      'download.default_folder.required':
+        '当前网站还没有保存的文件夹，请先点击下载按钮并选择一个文件夹。',
       'download.method': '下载方式',
       'download.method.placeholder': '选择下载方式',
       'download.method.direct': '直接下载',
       'download.method.showSaveFilePicker': '显示保存文件选择器',
+      'download.method.showDirectoryPicker': '保存到文件夹',
       'download.method.direct.description':
         '浏览器对下载文件的处理方式因浏览器类型、用户设置及其他因素而异。下载开始前可能出现用户确认提示，文件也可能自动保存，或直接在外部应用程序或浏览器本身中自动打开。',
       'download.method.showSaveFilePicker.description':
         '显示一个文件选择器，允许用户保存文件。用户既可选择现有文件，也可输入新文件的名称。',
+      'download.method.showDirectoryPicker.description':
+        '允许您选择一个文件夹，将 Markdown 文件和所有图片/附件直接保存到该文件夹中，无需创建 ZIP 压缩包。',
       'lark.docx.download': '下载为 Markdown',
       'lark.docx.copy': '复制为 Markdown',
       'lark.docx.view': '查看为 Markdown',

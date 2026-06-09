@@ -17,6 +17,20 @@ import {
 } from '../common/utils'
 import { getSettings, Grid } from '../common/settings'
 import { DownloadMethod, SettingKey } from '@/common/settings'
+import {
+  getDirectoryHandle,
+  saveDirectoryHandle,
+  checkPermission,
+} from '../common/directory-storage'
+
+/**
+ * 对文件名中的括号进行 URL 编码，避免 Markdown 序列化时被转义
+ * Markdown 中括号是特殊字符，会被转义为 \( 和 \)，导致路径不匹配
+ * URL 编码后 %28 和 %29 不会被转义，且 Markdown 渲染器会正确解码
+ */
+const encodeFileNameForMarkdown = (name: string): string => {
+  return name.replace(/\(/g, '%28').replace(/\)/g, '%29')
+}
 
 const uniqueFileName = new UniqueFileName()
 
@@ -36,6 +50,7 @@ const enum TranslationKey {
   FILE = 'file',
   CANCEL = 'cancel',
   SCROLL_DOCUMENT = 'scroll_document',
+  DEFAULT_FOLDER_REQUIRED = 'default_folder_required',
 }
 
 enum ToastKey {
@@ -68,6 +83,8 @@ i18next
           [TranslationKey.FILE]: 'File',
           [TranslationKey.CANCEL]: 'Cancel',
           [TranslationKey.SCROLL_DOCUMENT]: 'Scrolling to load document',
+          [TranslationKey.DEFAULT_FOLDER_REQUIRED]:
+            'Please set a default download folder in extension settings, or use right-click > Copy as Markdown instead.',
         },
         ...en,
       },
@@ -90,6 +107,8 @@ i18next
           [TranslationKey.FILE]: '文件',
           [TranslationKey.CANCEL]: '取消',
           [TranslationKey.SCROLL_DOCUMENT]: '滚动中，以便加载文档',
+          [TranslationKey.DEFAULT_FOLDER_REQUIRED]:
+            '请在扩展设置中设置默认下载文件夹，或使用右键菜单复制为 Markdown。',
         },
         ...zh,
       },
@@ -237,7 +256,8 @@ const downloadImage = async (
               },
             })
 
-            image.url = filename
+            // 对 image.url 进行 URL 编码，避免 Markdown 序列化时括号被转义
+            image.url = encodeFileNameForMarkdown(filename)
 
             return {
               filename,
@@ -324,7 +344,8 @@ const downloadFile = async (
             },
           })
 
-          file.url = filename
+          // 对 file.url 进行 URL 编码，避免 Markdown 序列化时括号被转义
+          file.url = encodeFileNameForMarkdown(filename)
 
           return {
             filename,
@@ -368,6 +389,44 @@ interface DownloadResult {
 }
 
 type File = mdast.Image | mdast.Link
+
+const saveToDirectory = async (
+  directoryHandle: FileSystemDirectoryHandle,
+  markdownFileName: string,
+  markdown: string,
+  downloadResults: DownloadResult[],
+): Promise<void> => {
+  // 写入 Markdown 文件
+  const mdFileHandle = await directoryHandle.getFileHandle(
+    `${markdownFileName}.md`,
+    { create: true },
+  )
+  const mdWritable = await mdFileHandle.createWritable()
+  await mdWritable.write(markdown)
+  await mdWritable.close()
+
+  // 写入图片和文件（保持子目录结构）
+  for (const { filename, content } of downloadResults) {
+    const parts = filename.split('/')
+    let currentDir = directoryHandle
+
+    // 创建子目录（images/, files/）
+    for (let i = 0; i < parts.length - 1; i++) {
+      currentDir = await currentDir.getDirectoryHandle(parts[i], {
+        create: true,
+      })
+    }
+
+    // 写入文件
+    const fileHandle = await currentDir.getFileHandle(
+      parts[parts.length - 1]!,
+      { create: true },
+    )
+    const writable = await fileHandle.createWritable()
+    await writable.write(content)
+    await writable.close()
+  }
+}
 
 const downloadFiles = async (
   files: File[],
@@ -569,114 +628,227 @@ const main = async (options: { signal?: AbortSignal } = {}) => {
   const ext = isZip ? '.zip' : '.md'
   const filename = `${recommendName}${ext}`
 
-  const toBlob = async () => {
+  // 目录模式：直接保存到文件夹
+  if (
+    settings[SettingKey.DownloadMethod] ===
+      DownloadMethod.ShowDirectoryPicker &&
+    typeof window.showDirectoryPicker === 'function'
+  ) {
     Toast.loading({
       content: i18next.t(TranslationKey.STILL_SAVING),
       keepAlive: true,
       key: ToastKey.DOWNLOADING,
     })
 
-    const singleFileContent = () => {
-      transformTableBySettings(tableWithParents, settings)
+    const imgs = images.filter(image => image.data?.fetchSources)
+    const diagrams = images.filter(image => image.data?.fetchBlob)
 
-      const markdown = Docx.stringify(root)
+    const results = await Promise.all([
+      downloadFiles(imgs, {
+        batchSize: 15,
+        onProgress: progress => {
+          Toast.loading({
+            content: i18next.t(TranslationKey.DOWNLOAD_PROGRESS, {
+              name: i18next.t(TranslationKey.IMAGE),
+              progress: Math.floor(progress * OneHundred),
+            }),
+            keepAlive: true,
+            key: TranslationKey.IMAGE,
+          })
+        },
+        onComplete: () => {
+          Toast.remove(TranslationKey.IMAGE)
+        },
+        signal,
+        useUUID: settings[SettingKey.DownloadFileWithUniqueName],
+        markdownFileName: recommendName,
+      }),
+      // Diagrams must be downloaded one by one
+      downloadFiles(diagrams, {
+        batchSize: 1,
+        signal,
+        useUUID: settings[SettingKey.DownloadFileWithUniqueName],
+        markdownFileName: recommendName,
+      }),
+      downloadFiles(files, {
+        onProgress: progress => {
+          Toast.loading({
+            content: i18next.t(TranslationKey.DOWNLOAD_PROGRESS, {
+              name: i18next.t(TranslationKey.FILE),
+              progress: Math.floor(progress * OneHundred),
+            }),
+            keepAlive: true,
+            key: TranslationKey.FILE,
+          })
+        },
+        onComplete: () => {
+          Toast.remove(TranslationKey.FILE)
+        },
+        signal,
+        useUUID: settings[SettingKey.DownloadFileWithUniqueName],
+        markdownFileName: recommendName,
+      }),
+    ])
 
-      return new Blob([markdown])
+    const downloadResults = results.flat(1)
+
+    transformTableBySettings(tableWithParents, settings)
+
+    const markdown = Docx.stringify(root)
+
+    // 优先使用已保存的文件夹句柄
+    let directoryHandle: FileSystemDirectoryHandle | null = null
+
+    try {
+      const savedHandle = await getDirectoryHandle()
+      if (savedHandle && (await checkPermission(savedHandle))) {
+        directoryHandle = savedHandle
+      }
+    } catch {
+      // 忽略错误，回退到弹出选择框
     }
 
-    const zipFileContent = async () => {
-      const zipFs = new fs.FS()
-
-      const imgs = images.filter(image => image.data?.fetchSources)
-      const diagrams = images.filter(image => image.data?.fetchBlob)
-
-      const results = await Promise.all([
-        downloadFiles(imgs, {
-          batchSize: 15,
-          onProgress: progress => {
-            Toast.loading({
-              content: i18next.t(TranslationKey.DOWNLOAD_PROGRESS, {
-                name: i18next.t(TranslationKey.IMAGE),
-                progress: Math.floor(progress * OneHundred),
-              }),
-              keepAlive: true,
-              key: TranslationKey.IMAGE,
-            })
-          },
-          onComplete: () => {
-            Toast.remove(TranslationKey.IMAGE)
-          },
-          signal,
-          useUUID: settings[SettingKey.DownloadFileWithUniqueName],
-          markdownFileName: recommendName,
-        }),
-        // Diagrams must be downloaded one by one
-        downloadFiles(diagrams, {
-          batchSize: 1,
-          signal,
-          useUUID: settings[SettingKey.DownloadFileWithUniqueName],
-          markdownFileName: recommendName,
-        }),
-        downloadFiles(files, {
-          onProgress: progress => {
-            Toast.loading({
-              content: i18next.t(TranslationKey.DOWNLOAD_PROGRESS, {
-                name: i18next.t(TranslationKey.FILE),
-                progress: Math.floor(progress * OneHundred),
-              }),
-              keepAlive: true,
-              key: TranslationKey.FILE,
-            })
-          },
-          onComplete: () => {
-            Toast.remove(TranslationKey.FILE)
-          },
-          signal,
-          useUUID: settings[SettingKey.DownloadFileWithUniqueName],
-          markdownFileName: recommendName,
-        }),
-      ])
-      results.flat(1).forEach(({ filename, content }) => {
-        zipFs.addBlob(filename, content)
-      })
-
-      transformTableBySettings(tableWithParents, settings)
-
-      const markdown = Docx.stringify(root)
-
-      zipFs.addText(`${recommendName}.md`, markdown)
-
-      return await zipFs.exportBlob()
-    }
-
-    const content = isZip ? await zipFileContent() : singleFileContent()
-
-    recoverScrollTop?.()
-
-    return content
-  }
-
-  if (
-    settings[SettingKey.DownloadMethod] === DownloadMethod.ShowSaveFilePicker &&
-    supported
-  ) {
-    if (!navigator.userActivation.isActive) {
-      const confirmed = await confirm()
-      if (!confirmed) {
-        throw new Error(DOWNLOAD_ABORTED)
+    // 如果没有已保存的句柄，弹出选择框（需要用户手势）
+    if (!directoryHandle) {
+      try {
+        directoryHandle = await window.showDirectoryPicker({
+          mode: 'readwrite',
+        })
+        // 保存用户选择的文件夹，下次自动复用
+        await saveDirectoryHandle(directoryHandle).catch(() => {
+          // 忽略保存失败
+        })
+      } catch (error) {
+        if (error instanceof DOMException && error.name === 'SecurityError') {
+          Toast.warning({
+            content: i18next.t(TranslationKey.DEFAULT_FOLDER_REQUIRED),
+          })
+          throw new Error(DOWNLOAD_ABORTED)
+        }
+        throw error
       }
     }
 
-    await fileSave(toBlob(), {
-      fileName: filename,
-      extensions: [ext],
-    })
-  } else {
-    const blob = await toBlob()
+    await saveToDirectory(
+      directoryHandle,
+      recommendName,
+      markdown,
+      downloadResults,
+    )
 
-    legacyFileSave(blob, {
-      fileName: filename,
-    })
+    recoverScrollTop?.()
+  } else {
+    // ZIP 模式或单文件模式
+    const toBlob = async () => {
+      Toast.loading({
+        content: i18next.t(TranslationKey.STILL_SAVING),
+        keepAlive: true,
+        key: ToastKey.DOWNLOADING,
+      })
+
+      const singleFileContent = () => {
+        transformTableBySettings(tableWithParents, settings)
+
+        const markdown = Docx.stringify(root)
+
+        return new Blob([markdown])
+      }
+
+      const zipFileContent = async () => {
+        const zipFs = new fs.FS()
+
+        const imgs = images.filter(image => image.data?.fetchSources)
+        const diagrams = images.filter(image => image.data?.fetchBlob)
+
+        const results = await Promise.all([
+          downloadFiles(imgs, {
+            batchSize: 15,
+            onProgress: progress => {
+              Toast.loading({
+                content: i18next.t(TranslationKey.DOWNLOAD_PROGRESS, {
+                  name: i18next.t(TranslationKey.IMAGE),
+                  progress: Math.floor(progress * OneHundred),
+                }),
+                keepAlive: true,
+                key: TranslationKey.IMAGE,
+              })
+            },
+            onComplete: () => {
+              Toast.remove(TranslationKey.IMAGE)
+            },
+            signal,
+            useUUID: settings[SettingKey.DownloadFileWithUniqueName],
+            markdownFileName: recommendName,
+          }),
+          // Diagrams must be downloaded one by one
+          downloadFiles(diagrams, {
+            batchSize: 1,
+            signal,
+            useUUID: settings[SettingKey.DownloadFileWithUniqueName],
+            markdownFileName: recommendName,
+          }),
+          downloadFiles(files, {
+            onProgress: progress => {
+              Toast.loading({
+                content: i18next.t(TranslationKey.DOWNLOAD_PROGRESS, {
+                  name: i18next.t(TranslationKey.FILE),
+                  progress: Math.floor(progress * OneHundred),
+                }),
+                keepAlive: true,
+                key: TranslationKey.FILE,
+              })
+            },
+            onComplete: () => {
+              Toast.remove(TranslationKey.FILE)
+            },
+            signal,
+            useUUID: settings[SettingKey.DownloadFileWithUniqueName],
+            markdownFileName: recommendName,
+          }),
+        ])
+        results.flat(1).forEach(({ filename, content }) => {
+          zipFs.addBlob(filename, content)
+        })
+
+        transformTableBySettings(tableWithParents, settings)
+
+        const markdown = Docx.stringify(root)
+
+        zipFs.addText(`${recommendName}.md`, markdown)
+
+        return await zipFs.exportBlob()
+      }
+
+      const content = isZip ? await zipFileContent() : singleFileContent()
+
+      recoverScrollTop?.()
+
+      return content
+    }
+
+    if (
+      settings[SettingKey.DownloadMethod] ===
+        DownloadMethod.ShowSaveFilePicker &&
+      supported
+    ) {
+      if (!navigator.userActivation.isActive) {
+        const confirmed = await confirm()
+        if (!confirmed) {
+          throw new Error(DOWNLOAD_ABORTED)
+        }
+      }
+
+      await fileSave(toBlob(), {
+        fileName: filename,
+        extensions: [ext],
+      })
+    } else {
+      const blob = await toBlob()
+
+      legacyFileSave(blob, {
+        fileName: filename,
+      })
+    }
   }
 }
 

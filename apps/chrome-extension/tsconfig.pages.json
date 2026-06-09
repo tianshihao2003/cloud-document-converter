@@ -14,6 +14,7 @@
     "src/lib",
     "src/components",
     "src/chrome-types.d.ts",
-    "src/vue.d.ts"
+    "src/vue.d.ts",
+    "src/file-system-access.d.ts"
   ]
 }
